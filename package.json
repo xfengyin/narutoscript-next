@@ -1,0 +1,25 @@
+{
+  "name": "NarutoScript Next",
+  "version": "1.0.0",
+  "description": "火影忍者手游自动化脚本 - 下一代版本",
+  "main": "cmd/main.go",
+  "scripts": {
+    "build": "go build -ldflags=\"-s -w\" -o narutoscript-next.exe ./cmd/main.go",
+    "run": "go run ./cmd/main.go",
+    "test": "go test ./...",
+    "build:web": "cd web && npm run build",
+    "dev:web": "cd web && npm run dev"
+  },
+  "keywords": [
+    "naruto",
+    "automation",
+    "game",
+    "script"
+  ],
+  "author": "xfengyin",
+  "license": "GPLv3",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xfengyin/narutoscript-next"
+  }
+}
