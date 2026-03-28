@@ -1,8 +1,6 @@
 package logger
 
 import (
-	"os"
-
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -29,34 +27,21 @@ func New() *Logger {
 			EncodeDuration: zapcore.StringDurationEncoder,
 			EncodeCaller:   zapcore.ShortCallerEncoder,
 		},
-		OutputPaths:      []string{"stdout", "logs/narutoscript.log"},
+		OutputPaths:      []string{"stdout"},
 		ErrorOutputPaths: []string{"stderr"},
 	}
 
-	logger, _ := config.Build()
+	logger, err := config.Build()
+	if err != nil {
+		// 如果构建失败，使用备用logger
+		logger = zap.NewNop()
+	}
 	return &Logger{logger.Sugar()}
 }
 
 func (l *Logger) Sync() error {
-	return l.SugaredLogger.Sync()
-}
-
-func NewFileLogger(path string) *Logger {
-	config := zap.Config{
-		Level:       zap.NewAtomicLevelAt(zapcore.InfoLevel),
-		Development: false,
-		Encoding:    "json",
-		EncoderConfig: zapcore.EncoderConfig{
-			TimeKey:        "time",
-			LevelKey:       "level",
-			MessageKey:     "msg",
-			LineEnding:     zapcore.DefaultLineEnding,
-			EncodeLevel:    zapcore.LowercaseLevelEncoder,
-			EncodeTime:     zapcore.ISO8601TimeEncoder,
-		},
-		OutputPaths: []string{path},
+	if l.SugaredLogger == nil {
+		return nil
 	}
-
-	logger, _ := config.Build()
-	return &Logger{logger.Sugar()}
+	return l.SugaredLogger.Sync()
 }
