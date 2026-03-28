@@ -1,0 +1,139 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: false
+
+env:
+  GO_VERSION: '1.22'
+
+jobs:
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+      
+      - name: Build frontend
+        working-directory: web
+        run: npm run build
+      
+      - name: Upload frontend build
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: internal/ui/dist
+
+  build-backend:
+    needs: build-frontend
+    strategy:
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            ext: .exe
+          - goos: darwin
+            goarch: amd64
+            ext: ''
+          - goos: darwin
+            goarch: arm64
+            ext: ''
+          - goos: linux
+            goarch: amd64
+            ext: ''
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: internal/ui/dist
+      
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      
+      - name: Download dependencies
+        run: go mod download
+      
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o narutoscript-next${{ matrix.ext }} ./cmd/main.go
+      
+      - name: Create package
+        run: |
+          mkdir -p release
+          cp narutoscript-next${{ matrix.ext }} release/
+          cp config.example.yaml release/config.yaml || true
+          cp README.md release/ || true
+          cd release && zip -r ../narutoscript-next-${{ matrix.goos }}-${{ matrix.goarch }}.zip .
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: narutoscript-next-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: narutoscript-next-${{ matrix.goos }}-${{ matrix.goarch }}.zip
+
+  release:
+    needs: build-backend
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/**/*.zip
+          generate_release_notes: true
+          body: |
+            ## NarutoScript Next ${{ github.ref_name }}
+            
+            ### 功能特性
+            - 🎮 游戏自动化日常任务
+            - 📊 现代化 Web 管理界面
+            - ⚡ 极致轻量 (~20MB)
+            - 🚀 一键启动，无需配置
+            
+            ### 下载说明
+            - Windows: 下载 `narutoscript-next-windows-amd64.zip`
+            - macOS Intel: 下载 `narutoscript-next-darwin-amd64.zip`
+            - macOS M1/M2: 下载 `narutoscript-next-darwin-arm64.zip`
+            - Linux: 下载 `narutoscript-next-linux-amd64.zip`
+            
+            ### 使用方法
+            1. 下载对应平台的压缩包
+            2. 解压到任意目录
+            3. 双击运行 `narutoscript-next` (或 `narutoscript-next.exe`)
+            4. 自动打开浏览器访问管理界面
