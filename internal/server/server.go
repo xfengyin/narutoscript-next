@@ -2,9 +2,6 @@ package server
 
 import (
 	"context"
-	"embed"
-	"fmt"
-	"io/fs"
 	"net/http"
 	"sync"
 	"time"
@@ -16,46 +13,37 @@ import (
 	"github.com/xfengyin/narutoscript-next/internal/automation"
 )
 
-// Version 版本信息
 var Version = "1.0.0"
 
-// Server HTTP 服务器
 type Server struct {
 	engine     *gin.Engine
 	app        *app.App
-	staticFS   embed.FS
+	scheduler  *automation.Scheduler
 	wsUpgrader websocket.Upgrader
 	wsClients  map[*websocket.Conn]bool
 	wsMu       sync.RWMutex
 }
 
-// New 创建服务器实例
-func New(application *app.App, staticFS embed.FS) *Server {
+func New(application *app.App, scheduler *automation.Scheduler) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 
-	// CORS 配置
 	engine.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept"},
-		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
 
 	s := &Server{
-		engine:   engine,
-		app:      application,
-		staticFS: staticFS,
-		wsUpgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				return true
-			},
-		},
-		wsClients: make(map[*websocket.Conn]bool),
+		engine:     engine,
+		app:        application,
+		scheduler:  scheduler,
+		wsUpgrader: websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+		wsClients:  make(map[*websocket.Conn]bool),
 	}
 
 	s.setupRoutes()
@@ -63,54 +51,25 @@ func New(application *app.App, staticFS embed.FS) *Server {
 }
 
 func (s *Server) setupRoutes() {
-	// API 路由
 	api := s.engine.Group("/api")
 	{
-		// 状态
 		api.GET("/status", s.getStatus)
 		api.GET("/version", s.getVersion)
 		api.GET("/stats", s.getStats)
-
-		// 任务
 		api.GET("/tasks", s.getTasks)
-		api.GET("/tasks/info", s.getTasksInfo)
 		api.POST("/start", s.startTasks)
 		api.POST("/stop", s.stopTasks)
 		api.POST("/task/:name/run", s.runTask)
-
-		// 日志
 		api.GET("/logs", s.getLogs)
 		api.GET("/logs/stream", s.streamLogs)
-
-		// 设备
 		api.GET("/device", s.getDevice)
 		api.POST("/device/connect", s.connectDevice)
 		api.GET("/device/screenshot", s.getScreenshot)
-
-		// 配置
 		api.GET("/config", s.getConfig)
-		api.PUT("/config", s.updateConfig)
 	}
-
-	// 静态文件服务
-	s.serveStatic()
-}
-
-func (s *Server) serveStatic() {
-	distFS, err := fs.Sub(s.staticFS, "internal/ui/dist")
-	if err != nil {
-		s.engine.GET("/", func(c *gin.Context) {
-			c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(indexHTML))
-		})
-		return
-	}
-
-	s.engine.GET("/assets/*filepath", func(c *gin.Context) {
-		c.FileFromFS(c.Request.URL.Path, http.FS(distFS))
-	})
 
 	s.engine.NoRoute(func(c *gin.Context) {
-		c.FileFromFS("index.html", http.FS(distFS))
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(indexHTML))
 	})
 }
 
@@ -119,7 +78,6 @@ func (s *Server) Start(addr string) error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
-	// 关闭所有 WebSocket 连接
 	s.wsMu.Lock()
 	defer s.wsMu.Unlock()
 	for client := range s.wsClients {
@@ -129,125 +87,62 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// ===== API Handlers =====
-
 func (s *Server) getStatus(c *gin.Context) {
 	state := s.app.GetState()
 	c.JSON(http.StatusOK, gin.H{
-		"running":       state.Running,
-		"device_name":   state.DeviceName,
-		"device_ready":  state.DeviceReady,
-		"uptime":        time.Since(state.StartTime).Seconds(),
-		"queue_length":  state.QueueLength,
-		"tasks_done":    state.Stats.TasksDone,
-		"tasks_total":   state.Stats.TasksTotal,
+		"running":      false,
+		"device_name":  state.DeviceName,
+		"device_ready": state.DeviceReady,
+		"uptime":       time.Since(state.StartTime).Seconds(),
+		"queue_length": s.scheduler.GetTaskQueueLength(),
+		"tasks_done":   state.Stats.TasksDone,
+		"tasks_total":  state.Stats.TasksTotal,
 	})
 }
 
 func (s *Server) getVersion(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"version": Version,
-		"go":      "1.22",
-	})
+	c.JSON(http.StatusOK, gin.H{"version": Version, "go": "1.22"})
 }
 
 func (s *Server) getStats(c *gin.Context) {
-	state := s.app.GetState()
-	c.JSON(http.StatusOK, state.Stats)
+	c.JSON(http.StatusOK, s.app.GetState().Stats)
 }
 
 func (s *Server) getTasks(c *gin.Context) {
 	state := s.app.GetState()
-	category := c.Query("category")
-
 	tasks := make([]gin.H, 0)
-	for _, task := range state.Tasks {
-		if category == "" || task.Category == category {
-			tasks = append(tasks, gin.H{
-				"name":        task.Name,
-				"display":     task.Display,
-				"category":    task.Category,
-				"status":      task.Status,
-				"message":     task.Message,
-				"progress":    task.Progress,
-				"duration":    task.Duration,
-				"retry_count": task.RetryCount,
-				"last_run":    task.LastRun,
-			})
-		}
+	for _, t := range state.Tasks {
+		tasks = append(tasks, gin.H{"name": t.Name, "display": t.Display, "category": t.Category, "status": t.Status, "message": t.Message})
 	}
-
-	c.JSON(http.StatusOK, tasks)
-}
-
-func (s *Server) getTasksInfo(c *gin.Context) {
-	tasks := automation.GetAllTasks()
 	c.JSON(http.StatusOK, tasks)
 }
 
 func (s *Server) startTasks(c *gin.Context) {
-	if err := s.app.StartScheduler(); err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"error":   "启动失败",
-			"message": err.Error(),
-		})
+	if err := s.app.ConnectDevice(); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "设备未连接", "message": err.Error()})
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "任务调度器已启动",
-		"time":    time.Now().Format(time.RFC3339),
-	})
+	go s.scheduler.Run()
+	c.JSON(http.StatusOK, gin.H{"message": "任务已启动"})
 }
 
 func (s *Server) stopTasks(c *gin.Context) {
-	s.app.StopScheduler()
-	c.JSON(http.StatusOK, gin.H{
-		"message": "任务调度器已停止",
-		"time":    time.Now().Format(time.RFC3339),
-	})
+	s.scheduler.Stop()
+	c.JSON(http.StatusOK, gin.H{"message": "任务已停止"})
 }
 
 func (s *Server) runTask(c *gin.Context) {
 	taskName := c.Param("name")
-
-	state := s.app.GetState()
-	if _, ok := state.Tasks[taskName]; !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在"})
-		return
-	}
-
-	if !state.DeviceReady {
+	if !s.app.GetState().DeviceReady {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "设备未连接"})
 		return
 	}
-
-	// 执行任务
-	if err := s.app.RunTask(taskName); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "任务执行失败",
-			"message": err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "任务已加入执行队列",
-		"task":    taskName,
-		"time":    time.Now().Format(time.RFC3339),
-	})
+	s.scheduler.RunTaskNow(taskName)
+	c.JSON(http.StatusOK, gin.H{"message": "任务已入队", "task": taskName})
 }
 
 func (s *Server) getLogs(c *gin.Context) {
-	limit := 100
-	if l := c.Query("limit"); l != "" {
-		if n, err := parseInt(l); err == nil && n > 0 {
-			limit = n
-		}
-	}
-
-	logs := s.app.GetLogs(limit)
-	c.JSON(http.StatusOK, logs)
+	c.JSON(http.StatusOK, s.app.GetLogs(100))
 }
 
 func (s *Server) streamLogs(c *gin.Context) {
@@ -267,65 +162,28 @@ func (s *Server) streamLogs(c *gin.Context) {
 		s.wsMu.Unlock()
 	}()
 
-	// 发送初始状态
-	state := s.app.GetState()
-	conn.WriteJSON(gin.H{
-		"type": "init",
-		"data": state,
-	})
-
-	// 定期推送状态更新
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			state := s.app.GetState()
-			err := conn.WriteJSON(gin.H{
-				"type": "state",
-				"data": state,
-			})
-			if err != nil {
-				return
-			}
-
-			// 发送最新日志
-			logs := s.app.GetLogs(5)
-			if len(logs) > 0 {
-				conn.WriteJSON(gin.H{
-					"type": "logs",
-					"data": logs,
-				})
-			}
+	for range ticker.C {
+		state := s.app.GetState()
+		if err := conn.WriteJSON(gin.H{"type": "state", "data": state}); err != nil {
+			return
 		}
 	}
 }
 
 func (s *Server) getDevice(c *gin.Context) {
 	state := s.app.GetState()
-	c.JSON(http.StatusOK, gin.H{
-		"name":    state.DeviceName,
-		"ready":   state.DeviceReady,
-		"width":   s.app.Config.Device.ScreenWidth,
-		"height":  s.app.Config.Device.ScreenHeight,
-	})
+	c.JSON(http.StatusOK, gin.H{"name": state.DeviceName, "ready": state.DeviceReady})
 }
 
 func (s *Server) connectDevice(c *gin.Context) {
 	if err := s.app.ConnectDevice(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "连接失败",
-			"message": err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
-	state := s.app.GetState()
-	c.JSON(http.StatusOK, gin.H{
-		"message":     "设备已连接",
-		"device_name": state.DeviceName,
-	})
+	c.JSON(http.StatusOK, gin.H{"message": "设备已连接"})
 }
 
 func (s *Server) getScreenshot(c *gin.Context) {
@@ -333,13 +191,11 @@ func (s *Server) getScreenshot(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "设备未连接"})
 		return
 	}
-
 	screen, err := s.app.Device.Screenshot()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
 	c.Data(http.StatusOK, "image/png", screen)
 }
 
@@ -347,18 +203,6 @@ func (s *Server) getConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, s.app.Config)
 }
 
-func (s *Server) updateConfig(c *gin.Context) {
-	// TODO: 实现配置更新
-	c.JSON(http.StatusOK, gin.H{"message": "配置已更新"})
-}
-
-func parseInt(s string) (int, error) {
-	var n int
-	_, err := fmt.Sscanf(s, "%d", &n)
-	return n, err
-}
-
-// 回退 HTML
 const indexHTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -366,31 +210,69 @@ const indexHTML = `<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NarutoScript Next</title>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-        }
-        .container { text-align: center; padding: 40px; }
-        .logo { font-size: 80px; margin-bottom: 20px; }
-        h1 { font-size: 32px; margin-bottom: 10px; }
-        p { color: #888; margin-bottom: 30px; }
-        .info { background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px; }
-        code { color: #ff6b35; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); min-height: 100vh; color: white; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        header { text-align: center; padding: 40px 0; }
+        .logo { font-size: 60px; margin-bottom: 10px; }
+        h1 { font-size: 28px; margin-bottom: 5px; }
+        .subtitle { color: #888; }
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 30px 0; }
+        .stat-card { background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px; text-align: center; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #ff6b35; }
+        .stat-label { color: #888; font-size: 14px; margin-top: 5px; }
+        .section { margin: 30px 0; }
+        .section-title { font-size: 18px; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        .tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+        .task { background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; }
+        .task-name { color: #ccc; }
+        .task-status { font-size: 12px; padding: 4px 10px; border-radius: 20px; }
+        .status-idle { background: #333; color: #888; }
+        .status-running { background: #1e40af; color: #93c5fd; }
+        .status-success { background: #166534; color: #86efac; }
+        .status-failed { background: #991b1b; color: #fca5a5; }
+        .actions { display: flex; gap: 10px; margin: 30px 0; }
+        button { padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; }
+        .btn-primary { background: #ff6b35; color: white; }
+        .btn-secondary { background: #333; color: #888; }
+        .device-status { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; }
+        .dot-green { background: #22c55e; }
+        .dot-red { background: #ef4444; }
+        footer { text-align: center; padding: 30px; color: #555; font-size: 12px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="logo">🍥</div>
-        <h1>NarutoScript Next</h1>
-        <p>前端未构建，请运行构建命令</p>
-        <div class="info">
-            <code>cd web && npm install && npm run build</code>
+        <header>
+            <div class="logo">🍥</div>
+            <h1>NarutoScript Next</h1>
+            <p class="subtitle">火影忍者手游自动化工具</p>
+        </header>
+        <div class="device-status">
+            <div class="dot" id="deviceDot"></div>
+            <span id="deviceText">检测设备中...</span>
         </div>
+        <div class="stats" id="stats">
+            <div class="stat-card"><div class="stat-value" id="gold">-</div><div class="stat-label">金币</div></div>
+            <div class="stat-card"><div class="stat-value" id="copper">-</div><div class="stat-label">铜币</div></div>
+            <div class="stat-card"><div class="stat-value" id="stamina">-</div><div class="stat-label">体力</div></div>
+            <div class="stat-card"><div class="stat-value" id="tasks">0/25</div><div class="stat-label">任务完成</div></div>
+        </div>
+        <div class="actions">
+            <button class="btn-primary" onclick="connectDevice()">连接设备</button>
+            <button class="btn-secondary" onclick="loadTasks()">刷新状态</button>
+        </div>
+        <div class="section"><div class="section-title">日常任务</div><div class="tasks" id="dailyTasks"></div></div>
+        <div class="section"><div class="section-title">收获系统</div><div class="tasks" id="harvestTasks"></div></div>
+        <div class="section"><div class="section-title">周常任务</div><div class="tasks" id="weeklyTasks"></div></div>
     </div>
+    <footer>NarutoScript Next v1.0.0</footer>
+    <script>
+        async function loadStatus() { try { const r = await fetch('/api/status'); const d = await r.json(); document.getElementById('deviceDot').className = 'dot ' + (d.device_ready ? 'dot-green' : 'dot-red'); document.getElementById('deviceText').textContent = d.device_ready ? '设备已连接: ' + d.device_name : '设备未连接'; document.getElementById('tasks').textContent = d.tasks_done + '/' + d.tasks_total; } catch(e) {} }
+        async function loadTasks() { try { const r = await fetch('/api/tasks'); const t = await r.json(); const c = {daily: document.getElementById('dailyTasks'), harvest: document.getElementById('harvestTasks'), weekly: document.getElementById('weeklyTasks')}; for (const k in c) c[k].innerHTML = ''; t.forEach(x => { const d = document.createElement('div'); d.className = 'task'; d.innerHTML = '<span class="task-name">'+x.display+'</span><span class="task-status status-'+x.status+'">'+x.status+'</span>'; c[x.category]?.appendChild(d); }); } catch(e) {} }
+        async function connectDevice() { try { const r = await fetch('/api/device/connect', {method: 'POST'}); const d = await r.json(); alert(r.ok ? '设备已连接' : '连接失败: ' + d.error); loadStatus(); } catch(e) { alert('连接失败'); } }
+        loadStatus(); loadTasks(); setInterval(loadStatus, 2000);
+    </script>
 </body>
 </html>`
