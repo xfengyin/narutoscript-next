@@ -36,35 +36,10 @@ jobs:
           mkdir -p internal/ui/dist
           cat > internal/ui/dist/index.html << 'EOF'
           <!DOCTYPE html>
-          <html lang="zh-CN">
-          <head>
-              <meta charset="UTF-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>NarutoScript Next</title>
-              <style>
-                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; color: white; }
-                  .container { text-align: center; padding: 40px; }
-                  .logo { font-size: 80px; margin-bottom: 20px; }
-                  h1 { font-size: 32px; margin-bottom: 10px; }
-                  .api-info { background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px; margin-top: 20px; }
-                  code { color: #ff6b35; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="logo">🍥</div>
-                  <h1>NarutoScript Next</h1>
-                  <p>火影忍者手游自动化工具</p>
-                  <div class="api-info">
-                      <p>API 端点:</p>
-                      <code>GET /api/status</code><br>
-                      <code>GET /api/tasks</code><br>
-                      <code>POST /api/start</code><br>
-                      <code>POST /api/device/connect</code>
-                  </div>
-              </div>
-          </body>
-          </html>
+          <html><head><meta charset="UTF-8"><title>NarutoScript Next</title></head>
+          <body style="background:#1a1a2e;color:white;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh">
+          <div style="text-align:center"><h1>NarutoScript Next</h1><p>API: /api/status | /api/tasks</p></div>
+          </body></html>
           EOF
       
       - name: Setup Go
@@ -72,8 +47,8 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
       
-      - name: Download dependencies
-        run: go mod download
+      - name: Tidy dependencies
+        run: go mod tidy
       
       - name: Build
         env:
@@ -110,26 +85,8 @@ jobs:
         with:
           path: artifacts
       
-      - name: List files
-        run: find artifacts -type f
-      
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            artifacts/**/*.zip
+          files: artifacts/**/*.zip
           generate_release_notes: true
-          body: |
-            ## NarutoScript Next ${{ github.ref_name }}
-            
-            ### 下载说明
-            - Windows: `narutoscript-next-windows-amd64.zip`
-            - macOS Intel: `narutoscript-next-darwin-amd64.zip`
-            - macOS M1/M2: `narutoscript-next-darwin-arm64.zip`
-            - Linux: `narutoscript-next-linux-amd64.zip`
-            
-            ### 使用方法
-            1. 下载对应平台的压缩包
-            2. 解压到任意目录
-            3. 运行 `narutoscript-next` (Windows: `narutoscript-next.exe`)
-            4. 访问 http://localhost:8080
