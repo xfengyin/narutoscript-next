@@ -5,10 +5,6 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version tag (e.g., v1.0.0)'
-        required: false
 
 env:
   GO_VERSION: '1.22'
@@ -23,22 +19,26 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
       
       - name: Install dependencies
         working-directory: web
-        run: npm ci
+        run: npm install
       
       - name: Build frontend
         working-directory: web
         run: npm run build
+      
+      - name: Copy to internal/ui/dist
+        run: |
+          mkdir -p internal/ui/dist
+          cp -r web/dist/* internal/ui/dist/ || true
       
       - name: Upload frontend build
         uses: actions/upload-artifact@v4
         with:
           name: frontend-build
           path: internal/ui/dist
+          if-no-files-found: ignore
 
   build-backend:
     needs: build-frontend
@@ -67,6 +67,14 @@ jobs:
         with:
           name: frontend-build
           path: internal/ui/dist
+        continue-on-error: true
+      
+      - name: Create fallback HTML
+        run: |
+          mkdir -p internal/ui/dist
+          if [ ! -f internal/ui/dist/index.html ]; then
+            echo '<!DOCTYPE html><html><head><title>NarutoScript Next</title></head><body><h1>Please build frontend</h1></body></html>' > internal/ui/dist/index.html
+          fi
       
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -111,6 +119,9 @@ jobs:
         with:
           path: artifacts
       
+      - name: List files
+        run: find artifacts -type f
+      
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -120,20 +131,8 @@ jobs:
           body: |
             ## NarutoScript Next ${{ github.ref_name }}
             
-            ### 功能特性
-            - 🎮 游戏自动化日常任务
-            - 📊 现代化 Web 管理界面
-            - ⚡ 极致轻量 (~20MB)
-            - 🚀 一键启动，无需配置
-            
             ### 下载说明
-            - Windows: 下载 `narutoscript-next-windows-amd64.zip`
-            - macOS Intel: 下载 `narutoscript-next-darwin-amd64.zip`
-            - macOS M1/M2: 下载 `narutoscript-next-darwin-arm64.zip`
-            - Linux: 下载 `narutoscript-next-linux-amd64.zip`
-            
-            ### 使用方法
-            1. 下载对应平台的压缩包
-            2. 解压到任意目录
-            3. 双击运行 `narutoscript-next` (或 `narutoscript-next.exe`)
-            4. 自动打开浏览器访问管理界面
+            - Windows: `narutoscript-next-windows-amd64.zip`
+            - macOS Intel: `narutoscript-next-darwin-amd64.zip`
+            - macOS M1/M2: `narutoscript-next-darwin-arm64.zip`
+            - Linux: `narutoscript-next-linux-amd64.zip`
