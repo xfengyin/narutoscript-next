@@ -5,45 +5,44 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
+// Config 应用配置
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Device   DeviceConfig   `mapstructure:"device"`
-	Automation AutomationConfig `mapstructure:"automation"`
+	Server     ServerConfig     `mapstructure:"server" yaml:"server"`
+	Device     DeviceConfig     `mapstructure:"device" yaml:"device"`
+	Automation AutomationConfig `mapstructure:"automation" yaml:"automation"`
 }
 
+// ServerConfig 服务配置
 type ServerConfig struct {
-	Port            int  `mapstructure:"port"`
-	AutoOpenBrowser bool `mapstructure:"auto_open_browser"`
+	Port            int  `mapstructure:"port" yaml:"port"`
+	AutoOpenBrowser bool `mapstructure:"auto_open_browser" yaml:"auto_open_browser"`
 }
 
+// DeviceConfig 设备配置
 type DeviceConfig struct {
-	ADBPath     string `mapstructure:"adb_path"`
-	ScreenWidth  int    `mapstructure:"screen_width"`
-	ScreenHeight int    `mapstructure:"screen_height"`
+	ADBPath      string `mapstructure:"adb_path" yaml:"adb_path"`
+	ScreenWidth  int    `mapstructure:"screen_width" yaml:"screen_width"`
+	ScreenHeight int    `mapstructure:"screen_height" yaml:"screen_height"`
 }
 
+// AutomationConfig 自动化配置
 type AutomationConfig struct {
-	MaxConcurrency int `mapstructure:"max_concurrency"`
-	RetryCount     int `mapstructure:"retry_count"`
-	RetryDelay     int `mapstructure:"retry_delay"`
+	MaxConcurrency int `mapstructure:"max_concurrency" yaml:"max_concurrency"`
+	RetryCount     int `mapstructure:"retry_count" yaml:"retry_count"`
+	RetryDelay     int `mapstructure:"retry_delay" yaml:"retry_delay"`
 }
 
+// LoadConfig 加载配置
 func LoadConfig() (*Config, error) {
 	// 设置默认值
-	viper.SetDefault("server.port", 8080)
-	viper.SetDefault("server.auto_open_browser", true)
-	viper.SetDefault("device.adb_path", "adb")
-	viper.SetDefault("device.screen_width", 1280)
-	viper.SetDefault("device.screen_height", 720)
-	viper.SetDefault("automation.max_concurrency", 3)
-	viper.SetDefault("automation.retry_count", 3)
-	viper.SetDefault("automation.retry_delay", 1000)
+	setDefaults()
 
 	// 配置文件路径
 	configPath := "config.yaml"
-	
+
 	// 如果配置文件不存在，创建默认配置
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		if err := createDefaultConfig(configPath); err != nil {
@@ -51,6 +50,7 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
+	// 读取配置
 	viper.SetConfigFile(configPath)
 	viper.SetConfigType("yaml")
 
@@ -66,26 +66,60 @@ func LoadConfig() (*Config, error) {
 	return &cfg, nil
 }
 
-func createDefaultConfig(path string) error {
-	defaultConfig := `# NarutoScript Next 配置文件
-
-server:
-  port: 8080                  # Web 服务端口
-  auto_open_browser: true     # 启动时自动打开浏览器
-
-device:
-  adb_path: "adb"             # ADB 路径
-  screen_width: 1280          # 屏幕宽度
-  screen_height: 720          # 屏幕高度
-
-automation:
-  max_concurrency: 3          # 最大并发任务数
-  retry_count: 3              # 失败重试次数
-  retry_delay: 1000           # 重试延迟(ms)
-`
-	return os.WriteFile(path, []byte(defaultConfig), 0644)
+// setDefaults 设置默认值
+func setDefaults() {
+	viper.SetDefault("server.port", 8080)
+	viper.SetDefault("server.auto_open_browser", true)
+	viper.SetDefault("device.adb_path", "adb")
+	viper.SetDefault("device.screen_width", 1280)
+	viper.SetDefault("device.screen_height", 720)
+	viper.SetDefault("automation.max_concurrency", 3)
+	viper.SetDefault("automation.retry_count", 3)
+	viper.SetDefault("automation.retry_delay", 1000)
 }
 
+// createDefaultConfig 创建默认配置文件
+func createDefaultConfig(path string) error {
+	defaultConfig := Config{
+		Server: ServerConfig{
+			Port:            8080,
+			AutoOpenBrowser: true,
+		},
+		Device: DeviceConfig{
+			ADBPath:      "adb",
+			ScreenWidth:  1280,
+			ScreenHeight: 720,
+		},
+		Automation: AutomationConfig{
+			MaxConcurrency: 3,
+			RetryCount:     3,
+			RetryDelay:     1000,
+		},
+	}
+
+	data, err := yaml.Marshal(&defaultConfig)
+	if err != nil {
+		return err
+	}
+
+	header := `# NarutoScript Next 配置文件
+# 配置文档: https://github.com/xfengyin/narutoscript-next#配置说明
+
+`
+
+	return os.WriteFile(path, append([]byte(header), data...), 0644)
+}
+
+// SaveConfig 保存配置
+func SaveConfig(cfg *Config) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile("config.yaml", data, 0644)
+}
+
+// GetConfigPath 获取配置文件路径
 func GetConfigPath() string {
 	exePath, _ := os.Executable()
 	return filepath.Dir(exePath)
