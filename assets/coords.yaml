@@ -1,0 +1,258 @@
+# 火影忍者手游 UI 坐标配置
+# 基准分辨率: 1280x720 (16:9)
+# 所有坐标会根据实际分辨率自动缩放
+
+# ===== 主界面 =====
+main_menu:
+  # 底部导航栏
+  bottom_nav:
+    home: [640, 680]       # 主页
+    ninja: [320, 680]      # 忍者
+    battle: [960, 680]     # 战斗
+    guild: [160, 680]      # 组织
+    shop: [1120, 680]      # 商店
+  
+  # 顶部资源区
+  top_resources:
+    gold: [200, 30]        # 金币位置（OCR识别）
+    copper: [400, 30]      # 铜币位置
+    stamina: [600, 30]     # 体力位置
+  
+  # 常用按钮
+  buttons:
+    close: [1200, 50]      # 关闭弹窗
+    back: [80, 50]         # 返回
+    confirm: [640, 500]    # 确认按钮（通用位置）
+    cancel: [400, 500]     # 取消按钮
+
+# ===== 日常任务 =====
+daily:
+  # 任务入口位置
+  entries:
+    team_raid: [500, 400]     # 小队突袭
+    bounty_hall: [700, 400]   # 丰饶之间
+    guild_pray: [300, 300]    # 组织祈福
+    survival: [900, 400]      # 生存试炼
+    equipment: [600, 500]     # 装备扫荡
+    task_hall: [400, 300]     # 任务集会所
+    secret_realm: [800, 300]  # 秘境挑战
+    shop: [1000, 300]         # 商店购买
+  
+  # 小队突袭
+  team_raid:
+    enter: [500, 400]         # 进入入口
+    select_difficulty: [640, 300]  # 选择难度
+    start_battle: [640, 500]  # 开始战斗
+    auto_battle: [1200, 600]  # 自动战斗
+    claim_reward: [640, 400]  # 领取奖励
+    repeat_times: 3           # 重复次数
+  
+  # 丰饶之间
+  bounty_hall:
+    enter: [700, 400]
+    select_type: [400, 300]   # 选择类型（铜币/金币/经验）
+    start: [640, 500]
+    auto: [1200, 600]
+    claim: [640, 400]
+    repeat_times: 3
+  
+  # 组织祈福
+  guild_pray:
+    enter_guild: [160, 680]   # 进入组织
+    pray_button: [640, 400]   # 祈福按钮
+    select_level: [400, 300]  # 选择祈福等级
+    confirm: [640, 500]
+    repeat_times: 1
+  
+  # 生存试炼
+  survival:
+    enter: [900, 400]
+    start: [640, 500]
+    auto: [1200, 600]
+    next_floor: [640, 400]
+    claim_all: [640, 300]
+  
+  # 装备扫荡
+  equipment:
+    enter: [600, 500]
+    select_stage: [400, 300]  # 选择关卡
+    sweep: [640, 500]         # 扫荡
+    sweep_times: [800, 300]   # 扫荡次数选择
+    confirm: [640, 400]
+    claim: [640, 300]
+  
+  # 任务集会所
+  task_hall:
+    enter: [400, 300]
+    claim_all: [640, 400]     # 领取全部
+    refresh: [1000, 300]      # 刷新任务
+  
+  # 秘境挑战
+  secret_realm:
+    enter: [800, 300]
+    select_realm: [400, 400]  # 选择秘境类型
+    start: [640, 500]
+    auto: [1200, 600]
+    claim: [640, 400]
+    repeat_times: 2
+  
+  # 商店购买
+  shop:
+    enter: [1120, 680]
+    daily_shop: [300, 300]    # 日常商店
+    buy_all: [640, 400]       # 全部购买
+    confirm: [640, 500]
+
+# ===== 收获系统 =====
+harvest:
+  # 招财
+  lucky_money:
+    enter: [500, 400]
+    free_claim: [400, 300]    # 免费招财
+    premium_claim: [800, 300] # 高级招财
+    claim: [640, 400]
+  
+  # 情报社
+  intel_agency:
+    enter: [700, 400]
+    claim_intel: [640, 300]   # 领取情报
+    refresh: [1000, 300]
+  
+  # 排行榜
+  ranking:
+    enter: [900, 400]
+    claim_reward: [640, 300]
+  
+  # 活跃度宝箱
+  activity_box:
+    position: [1100, 100]     # 活跃度进度条位置
+    box_20: [200, 200]        # 20活跃度宝箱
+    box_40: [400, 200]        # 40活跃度宝箱
+    box_60: [600, 200]        # 60活跃度宝箱
+    box_80: [800, 200]        # 80活跃度宝箱
+    box_100: [1000, 200]      # 100活跃度宝箱
+  
+  # 每月签到
+  monthly_sign:
+    enter: [300, 200]
+    claim_today: [640, 400]
+  
+  # 忍法帖
+  ninja_pass:
+    enter: [500, 300]
+    claim_level: [640, 400]   # 领取当前等级奖励
+    claim_all: [800, 300]
+  
+  # 每日分享
+  share:
+    enter: [200, 200]
+    share_button: [640, 400]
+    confirm: [640, 500]
+  
+  # 邮件
+  mail:
+    enter: [100, 100]         # 邮件图标
+    claim_all: [640, 400]     # 一键领取
+    delete_read: [800, 300]   # 删除已读
+  
+  # 赠送体力
+  stamina_gift:
+    enter: [200, 300]
+    gift_friends: [400, 400]  # 赠送给好友
+    claim_gifts: [800, 400]   # 领取好友赠送
+  
+  # 招募
+  recruit:
+    enter: [400, 400]
+    free_recruit: [400, 300]  # 免费招募
+    premium_recruit: [800, 300]
+    confirm: [640, 500]
+
+# ===== 周常任务 =====
+weekly:
+  # 修行之路
+  practice:
+    enter: [500, 400]
+    start_chapter: [400, 300]
+    start_battle: [640, 500]
+    auto: [1200, 600]
+    next_chapter: [640, 400]
+  
+  # 追击晓组织
+  chase_akatsuki:
+    enter: [700, 400]
+    select_member: [400, 300]
+    start: [640, 500]
+    auto: [1200, 600]
+    claim: [640, 400]
+  
+  # 叛忍来袭
+  rebel:
+    enter: [300, 300]
+    join_battle: [640, 500]
+    auto: [1200, 600]
+    claim: [640, 400]
+  
+  # 组织要塞
+  guild_fortress:
+    enter_guild: [160, 680]
+    fortress: [640, 400]
+    join: [640, 500]
+    battle: [1200, 600]
+    claim: [640, 300]
+  
+  # 天地战场
+  battlefield:
+    enter: [900, 300]
+    select_side: [400, 400]
+    join_battle: [640, 500]
+    auto: [1200, 600]
+    claim: [640, 400]
+
+# ===== 限时活动 =====
+event:
+  # 丁次烤肉
+  bbq:
+    enter: [500, 400]
+    start_grill: [640, 500]
+    feed_meat: [400, 300]
+    claim_reward: [640, 400]
+  
+  # 樱花季
+  sakura:
+    enter: [700, 400]
+    collect_petals: [640, 300]
+    exchange_reward: [640, 500]
+    claim: [640, 400]
+
+# ===== 等待时间配置 =====
+wait_times:
+  page_load: 2000      # 页面加载等待(ms)
+  battle_start: 3000   # 战斗开始等待
+  battle_end: 5000     # 战斗结束等待
+  reward_claim: 1000   # 领取奖励等待
+  animation: 500       # 动画等待
+  retry_delay: 1000    # 重试延迟
+
+# ===== OCR 区域配置 =====
+ocr_regions:
+  gold:
+    x: 150
+    y: 20
+    w: 100
+    h: 30
+  copper:
+    x: 350
+    y: 20
+    w: 100
+    h: 30
+  stamina:
+    x: 550
+    y: 20
+    w: 100
+    h: 30
+  activity_value:
+    x: 1000
+    y: 80
+    w: 80
+    h: 30
