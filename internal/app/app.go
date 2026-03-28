@@ -7,6 +7,7 @@ import (
 
 	"github.com/xfengyin/narutoscript-next/internal/automation"
 	"github.com/xfengyin/narutoscript-next/internal/device"
+	"github.com/xfengyin/narutoscript-next/internal/ocr"
 	"github.com/xfengyin/narutoscript-next/internal/vision"
 	"github.com/xfengyin/narutoscript-next/pkg/logger"
 )
@@ -20,6 +21,7 @@ type App struct {
 	Logger    *logger.Logger
 	Device    *device.Controller
 	Vision    *vision.Matcher
+	OCR       *ocr.Service
 	Scheduler *automation.Scheduler
 	State     *AppState
 	logStore  *LogStore
@@ -36,6 +38,7 @@ type AppState struct {
 	Tasks       map[string]*TaskState
 	Stats       *GameStats
 	StartTime   time.Time
+	QueueLength int
 }
 
 // TaskState 任务状态
@@ -43,23 +46,24 @@ type TaskState struct {
 	Name       string    `json:"name"`
 	Display    string    `json:"display"`
 	Category   string    `json:"category"`
-	Status     string    `json:"status"` // idle, running, success, failed, waiting
+	Status     string    `json:"status"`
 	Progress   int       `json:"progress"`
 	Message    string    `json:"message"`
 	StartTime  time.Time `json:"start_time"`
 	EndTime    time.Time `json:"end_time"`
 	Duration   int64     `json:"duration_ms"`
 	RetryCount int       `json:"retry_count"`
+	LastRun    time.Time `json:"last_run"`
 }
 
 // GameStats 游戏数据
 type GameStats struct {
-	Gold       int64 `json:"gold"`
-	Copper     int64 `json:"copper"`
-	Stamina    int   `json:"stamina"`
-	MaxStamina int   `json:"max_stamina"`
-	TasksDone  int   `json:"tasks_done"`
-	TasksTotal int   `json:"tasks_total"`
+	Gold       int64     `json:"gold"`
+	Copper     int64     `json:"copper"`
+	Stamina    int       `json:"stamina"`
+	MaxStamina int       `json:"max_stamina"`
+	TasksDone  int       `json:"tasks_done"`
+	TasksTotal int       `json:"tasks_total"`
 	LastUpdate time.Time `json:"last_update"`
 }
 
@@ -100,7 +104,6 @@ func (s *LogStore) Add(level, message, task string) {
 
 	s.logs = append(s.logs, entry)
 
-	// 超出最大数量时删除旧日志
 	if len(s.logs) > s.maxSize {
 		s.logs = s.logs[len(s.logs)-s.maxSize:]
 	}
@@ -115,7 +118,6 @@ func (s *LogStore) Get(limit int) []LogEntry {
 		limit = len(s.logs)
 	}
 
-	// 返回最新的日志
 	start := len(s.logs) - limit
 	if start < 0 {
 		start = 0
@@ -145,6 +147,7 @@ func New(cfg *Config, log *logger.Logger) *App {
 		Logger:   log,
 		Device:   device.NewController(cfg.Device, log),
 		Vision:   vision.NewMatcher(log),
+		OCR:      ocr.NewService(),
 		State:    state,
 		logStore: NewLogStore(1000),
 		ctx:      ctx,
@@ -195,6 +198,13 @@ func initTaskStates(state *AppState) {
 		{"sakura", "樱花季"},
 	}
 
+	// 批量任务
+	batchTasks := []struct{ name, display string }{
+		{"daily_all", "所有日常"},
+		{"harvest_all", "所有收获"},
+		{"weekly_all", "所有周常"},
+	}
+
 	allTasks := make([]struct {
 		name, display, category string
 	}, 0)
@@ -219,8 +229,13 @@ func initTaskStates(state *AppState) {
 			name, display, category string
 		}{t.name, t.display, "event"})
 	}
+	for _, t := range batchTasks {
+		allTasks = append(allTasks, struct {
+			name, display, category string
+		}{t.name, t.display, "batch"})
+	}
 
-	state.Stats.TasksTotal = len(allTasks)
+	state.Stats.TasksTotal = len(allTasks) - 3 // 批量任务不计入总数
 
 	for _, t := range allTasks {
 		state.Tasks[t.name] = &TaskState{
@@ -238,6 +253,7 @@ func (a *App) ConnectDevice() error {
 		a.State.mu.Lock()
 		a.State.DeviceReady = false
 		a.State.mu.Unlock()
+		a.logStore.Add("error", "设备连接失败: "+err.Error(), "")
 		return err
 	}
 
@@ -259,7 +275,14 @@ func (a *App) StartScheduler() error {
 		return nil
 	}
 
-	a.Scheduler = automation.NewScheduler(a.Config.Automation, a.Logger)
+	// 确保设备已连接
+	if !a.State.DeviceReady {
+		if err := a.ConnectDevice(); err != nil {
+			return err
+		}
+	}
+
+	a.Scheduler = automation.NewScheduler(a.Config.Automation, a, a.Logger)
 	a.State.Running = true
 	a.logStore.Add("info", "任务调度器已启动", "")
 
@@ -280,12 +303,22 @@ func (a *App) StopScheduler() {
 	a.logStore.Add("info", "任务调度器已停止", "")
 }
 
+// RunTask 立即执行任务
+func (a *App) RunTask(taskName string) error {
+	if a.Scheduler == nil {
+		if err := a.StartScheduler(); err != nil {
+			return err
+		}
+	}
+
+	return a.Scheduler.RunTaskNow(taskName)
+}
+
 // GetState 获取状态
 func (a *App) GetState() *AppState {
 	a.State.mu.RLock()
 	defer a.State.mu.RUnlock()
 
-	// 返回副本
 	tasks := make(map[string]*TaskState)
 	for k, v := range a.State.Tasks {
 		taskCopy := *v
@@ -294,6 +327,11 @@ func (a *App) GetState() *AppState {
 
 	statsCopy := *a.State.Stats
 
+	queueLen := 0
+	if a.Scheduler != nil {
+		queueLen = a.Scheduler.GetTaskQueueLength()
+	}
+
 	return &AppState{
 		Running:     a.State.Running,
 		DeviceName:  a.State.DeviceName,
@@ -301,6 +339,7 @@ func (a *App) GetState() *AppState {
 		Tasks:       tasks,
 		Stats:       &statsCopy,
 		StartTime:   a.State.StartTime,
+		QueueLength: queueLen,
 	}
 }
 
@@ -318,6 +357,12 @@ func (a *App) UpdateTaskState(name string, status, message string) {
 		} else if status == "success" || status == "failed" {
 			task.EndTime = time.Now()
 			task.Duration = task.EndTime.Sub(task.StartTime).Milliseconds()
+			task.LastRun = task.EndTime
+
+			// 更新完成计数
+			if status == "success" && task.Category != "batch" {
+				a.State.Stats.TasksDone++
+			}
 		}
 	}
 }
@@ -330,4 +375,23 @@ func (a *App) GetLogs(limit int) []LogEntry {
 // AddLog 添加日志
 func (a *App) AddLog(level, message, task string) {
 	a.logStore.Add(level, message, task)
+}
+
+// UpdateStatsFromScreenshot 从截图更新数据
+func (a *App) UpdateStatsFromScreenshot() error {
+	// 截图
+	screen, err := a.Device.Screenshot()
+	if err != nil {
+		return err
+	}
+
+	// OCR 识别资源（如果配置了 OCR）
+	// gold, err := a.OCR.RecognizeRegionNumber(screen, 150, 20, 100, 30)
+	// ...
+
+	a.State.mu.Lock()
+	defer a.State.mu.Unlock()
+	a.State.Stats.LastUpdate = time.Now()
+
+	return nil
 }
