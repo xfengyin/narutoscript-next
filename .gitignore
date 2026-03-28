@@ -1,0 +1,40 @@
+# 忽略编译产物
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# 忽略测试文件
+*.test
+*.out
+
+# 忽略依赖
+vendor/
+
+# 忽略 IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 忽略日志
+logs/
+*.log
+
+# 忽略配置
+config.yaml
+
+# 忽略前端构建产物
+web/node_modules/
+web/dist/
+
+# 忽略临时文件
+tmp/
+temp/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
