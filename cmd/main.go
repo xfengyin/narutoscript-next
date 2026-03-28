@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"net/http"
 	"os"
@@ -13,41 +12,32 @@ import (
 	"time"
 
 	"github.com/xfengyin/narutoscript-next/internal/app"
+	"github.com/xfengyin/narutoscript-next/internal/automation"
 	"github.com/xfengyin/narutoscript-next/internal/server"
 	"github.com/xfengyin/narutoscript-next/pkg/logger"
 )
 
-// 构建时注入的版本信息
 var (
 	Version   = "1.0.0"
 	GitCommit = "unknown"
 	BuildTime = "unknown"
 )
 
-//go:embed all:internal/ui/dist
-var staticFS embed.FS
-
 func main() {
-	// 初始化日志
 	log := logger.New()
 	defer log.Sync()
 
-	// 打印启动信息
 	printBanner(log)
 
-	// 加载配置
 	cfg, err := app.LoadConfig()
 	if err != nil {
 		log.Fatal("加载配置失败", "error", err)
 	}
 
-	// 创建应用
 	application := app.New(cfg, log)
+	scheduler := automation.NewScheduler(application.Device, application.Vision, log, application)
+	srv := server.New(application, scheduler)
 
-	// 启动服务
-	srv := server.New(application, staticFS)
-
-	// 启动 HTTP 服务
 	go func() {
 		addr := fmt.Sprintf(":%d", cfg.Server.Port)
 		log.Info("启动服务", "addr", addr, "version", Version)
@@ -56,34 +46,25 @@ func main() {
 		}
 	}()
 
-	// 自动打开浏览器
 	if cfg.Server.AutoOpenBrowser {
 		go func() {
 			time.Sleep(500 * time.Millisecond)
 			url := fmt.Sprintf("http://localhost:%d", cfg.Server.Port)
-			if err := openBrowser(url); err != nil {
-				log.Warn("无法自动打开浏览器", "error", err)
-			}
+			openBrowser(url)
 		}()
 	}
 
-	// 等待中断信号
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	log.Info("正在关闭服务...")
 
-	// 优雅关闭
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Error("服务关闭错误", "error", err)
-	}
-
-	// 停止任务调度器
-	application.StopScheduler()
+	srv.Shutdown(ctx)
+	scheduler.Stop()
 
 	log.Info("服务已关闭")
 }
@@ -98,15 +79,10 @@ func printBanner(log *logger.Logger) {
                                                                 
 `
 	fmt.Println(banner)
-	log.Info("NarutoScript Next 启动中...",
-		"version", Version,
-		"commit", GitCommit,
-		"go", runtime.Version(),
-		"os", runtime.GOOS+"/"+runtime.GOARCH,
-	)
+	log.Info("NarutoScript Next 启动中...", "version", Version, "go", runtime.Version(), "os", runtime.GOOS+"/"+runtime.GOARCH)
 }
 
-func openBrowser(url string) error {
+func openBrowser(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
@@ -116,7 +92,7 @@ func openBrowser(url string) error {
 	case "linux":
 		cmd = exec.Command("xdg-open", url)
 	default:
-		return fmt.Errorf("不支持的操作系统: %s", runtime.GOOS)
+		return
 	}
-	return cmd.Start()
+	cmd.Start()
 }
