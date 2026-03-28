@@ -1,0 +1,15 @@
+# NarutoScript Next 配置文件
+
+server:
+  port: 8080                  # Web 服务端口
+  auto_open_browser: true     # 启动时自动打开浏览器
+
+device:
+  adb_path: "adb"             # ADB 路径（已添加到 PATH 可直接用 adb）
+  screen_width: 1280          # 屏幕宽度
+  screen_height: 720          # 屏幕高度
+
+automation:
+  max_concurrency: 3          # 最大并发任务数
+  retry_count: 3              # 失败重试次数
+  retry_delay: 1000           # 重试延迟(ms)
