@@ -3,14 +3,17 @@ package server
 import (
 	"context"
 	"embed"
+	"fmt"
 	"io/fs"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/xfengyin/narutoscript-next/internal/app"
+	"github.com/xfengyin/narutoscript-next/internal/automation"
 )
 
 // Version 版本信息
@@ -23,6 +26,7 @@ type Server struct {
 	staticFS   embed.FS
 	wsUpgrader websocket.Upgrader
 	wsClients  map[*websocket.Conn]bool
+	wsMu       sync.RWMutex
 }
 
 // New 创建服务器实例
@@ -69,6 +73,7 @@ func (s *Server) setupRoutes() {
 
 		// 任务
 		api.GET("/tasks", s.getTasks)
+		api.GET("/tasks/info", s.getTasksInfo)
 		api.POST("/start", s.startTasks)
 		api.POST("/stop", s.stopTasks)
 		api.POST("/task/:name/run", s.runTask)
@@ -80,6 +85,7 @@ func (s *Server) setupRoutes() {
 		// 设备
 		api.GET("/device", s.getDevice)
 		api.POST("/device/connect", s.connectDevice)
+		api.GET("/device/screenshot", s.getScreenshot)
 
 		// 配置
 		api.GET("/config", s.getConfig)
@@ -114,8 +120,11 @@ func (s *Server) Start(addr string) error {
 
 func (s *Server) Shutdown(ctx context.Context) error {
 	// 关闭所有 WebSocket 连接
+	s.wsMu.Lock()
+	defer s.wsMu.Unlock()
 	for client := range s.wsClients {
 		client.Close()
+		delete(s.wsClients, client)
 	}
 	return nil
 }
@@ -125,10 +134,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) getStatus(c *gin.Context) {
 	state := s.app.GetState()
 	c.JSON(http.StatusOK, gin.H{
-		"running":      state.Running,
-		"device_name":  state.DeviceName,
-		"device_ready": state.DeviceReady,
-		"uptime":       time.Since(state.StartTime).Seconds(),
+		"running":       state.Running,
+		"device_name":   state.DeviceName,
+		"device_ready":  state.DeviceReady,
+		"uptime":        time.Since(state.StartTime).Seconds(),
+		"queue_length":  state.QueueLength,
+		"tasks_done":    state.Stats.TasksDone,
+		"tasks_total":   state.Stats.TasksTotal,
 	})
 }
 
@@ -152,14 +164,15 @@ func (s *Server) getTasks(c *gin.Context) {
 	for _, task := range state.Tasks {
 		if category == "" || task.Category == category {
 			tasks = append(tasks, gin.H{
-				"name":       task.Name,
-				"display":    task.Display,
-				"category":   task.Category,
-				"status":     task.Status,
-				"message":    task.Message,
-				"progress":   task.Progress,
-				"duration":   task.Duration,
+				"name":        task.Name,
+				"display":     task.Display,
+				"category":    task.Category,
+				"status":      task.Status,
+				"message":     task.Message,
+				"progress":    task.Progress,
+				"duration":    task.Duration,
 				"retry_count": task.RetryCount,
+				"last_run":    task.LastRun,
 			})
 		}
 	}
@@ -167,22 +180,22 @@ func (s *Server) getTasks(c *gin.Context) {
 	c.JSON(http.StatusOK, tasks)
 }
 
+func (s *Server) getTasksInfo(c *gin.Context) {
+	tasks := automation.GetAllTasks()
+	c.JSON(http.StatusOK, tasks)
+}
+
 func (s *Server) startTasks(c *gin.Context) {
-	if err := s.app.ConnectDevice(); err != nil {
+	if err := s.app.StartScheduler(); err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"error":   "设备未连接",
+			"error":   "启动失败",
 			"message": err.Error(),
 		})
 		return
 	}
 
-	if err := s.app.StartScheduler(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
 	c.JSON(http.StatusOK, gin.H{
-		"message": "任务已启动",
+		"message": "任务调度器已启动",
 		"time":    time.Now().Format(time.RFC3339),
 	})
 }
@@ -190,7 +203,7 @@ func (s *Server) startTasks(c *gin.Context) {
 func (s *Server) stopTasks(c *gin.Context) {
 	s.app.StopScheduler()
 	c.JSON(http.StatusOK, gin.H{
-		"message": "任务已停止",
+		"message": "任务调度器已停止",
 		"time":    time.Now().Format(time.RFC3339),
 	})
 }
@@ -209,12 +222,17 @@ func (s *Server) runTask(c *gin.Context) {
 		return
 	}
 
-	// 更新任务状态
-	s.app.UpdateTaskState(taskName, "running", "正在执行...")
-	s.app.AddLog("info", "开始执行任务: "+taskName, taskName)
+	// 执行任务
+	if err := s.app.RunTask(taskName); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "任务执行失败",
+			"message": err.Error(),
+		})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "任务已启动",
+		"message": "任务已加入执行队列",
 		"task":    taskName,
 		"time":    time.Now().Format(time.RFC3339),
 	})
@@ -239,13 +257,20 @@ func (s *Server) streamLogs(c *gin.Context) {
 	}
 	defer conn.Close()
 
+	s.wsMu.Lock()
 	s.wsClients[conn] = true
-	defer delete(s.wsClients, conn)
+	s.wsMu.Unlock()
+
+	defer func() {
+		s.wsMu.Lock()
+		delete(s.wsClients, conn)
+		s.wsMu.Unlock()
+	}()
 
 	// 发送初始状态
 	state := s.app.GetState()
 	conn.WriteJSON(gin.H{
-		"type": "state",
+		"type": "init",
 		"data": state,
 	})
 
@@ -263,6 +288,15 @@ func (s *Server) streamLogs(c *gin.Context) {
 			})
 			if err != nil {
 				return
+			}
+
+			// 发送最新日志
+			logs := s.app.GetLogs(5)
+			if len(logs) > 0 {
+				conn.WriteJSON(gin.H{
+					"type": "logs",
+					"data": logs,
+				})
 			}
 		}
 	}
@@ -292,6 +326,21 @@ func (s *Server) connectDevice(c *gin.Context) {
 		"message":     "设备已连接",
 		"device_name": state.DeviceName,
 	})
+}
+
+func (s *Server) getScreenshot(c *gin.Context) {
+	if !s.app.GetState().DeviceReady {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "设备未连接"})
+		return
+	}
+
+	screen, err := s.app.Device.Screenshot()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Data(http.StatusOK, "image/png", screen)
 }
 
 func (s *Server) getConfig(c *gin.Context) {
