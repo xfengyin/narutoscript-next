@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
-	"github.com/xfengyin/narutoscript-next/internal/app"
 	"github.com/xfengyin/narutoscript-next/internal/device"
 	"github.com/xfengyin/narutoscript-next/internal/vision"
 	"github.com/xfengyin/narutoscript-next/pkg/logger"
@@ -18,8 +17,12 @@ type TaskExecutor struct {
 	vision *vision.Matcher
 	coords *CoordinateConfig
 	log    *logger.Logger
-	app    *app.App
 	mu     sync.Mutex
+}
+
+// TaskStateUpdater 任务状态更新接口
+type TaskStateUpdater interface {
+	UpdateTaskState(name string, status string, message string)
 }
 
 // CoordinateConfig 坐标配置
@@ -32,7 +35,6 @@ type CoordinateConfig struct {
 	WaitTimes WaitTimesConfig `mapstructure:"wait_times"`
 }
 
-// 各模块配置结构
 type MainMenuConfig struct {
 	BottomNav    map[string][]int `mapstructure:"bottom_nav"`
 	TopResources map[string][]int `mapstructure:"top_resources"`
@@ -114,14 +116,13 @@ type WaitTimesConfig struct {
 }
 
 // NewTaskExecutor 创建任务执行器
-func NewTaskExecutor(dev *device.Controller, vis *vision.Matcher, appInst *app.App, log *logger.Logger) *TaskExecutor {
+func NewTaskExecutor(dev *device.Controller, vis *vision.Matcher, log *logger.Logger) *TaskExecutor {
 	coords := loadCoordinateConfig()
 	return &TaskExecutor{
 		device: dev,
 		vision: vis,
 		coords: coords,
 		log:    log,
-		app:    appInst,
 	}
 }
 
@@ -226,22 +227,30 @@ type TaskStep struct {
 }
 
 // ExecuteTask 执行任务
-func (e *TaskExecutor) ExecuteTask(taskName string, steps []TaskStep) error {
+func (e *TaskExecutor) ExecuteTask(taskName string, steps []TaskStep, updater TaskStateUpdater) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	e.app.UpdateTaskState(taskName, "running", "开始执行")
+	if updater != nil {
+		updater.UpdateTaskState(taskName, "running", "开始执行")
+	}
 	e.log.Info("开始任务", "task", taskName)
 
 	for i, step := range steps {
-		e.app.UpdateTaskState(taskName, "running", fmt.Sprintf("步骤 %d/%d: %s", i+1, len(steps), step.Desc))
+		if updater != nil {
+			updater.UpdateTaskState(taskName, "running", fmt.Sprintf("步骤 %d/%d: %s", i+1, len(steps), step.Desc))
+		}
 		if err := step.Action(e); err != nil {
-			e.app.UpdateTaskState(taskName, "failed", fmt.Sprintf("步骤 %d 失败: %v", i+1, err))
+			if updater != nil {
+				updater.UpdateTaskState(taskName, "failed", fmt.Sprintf("步骤 %d 失败: %v", i+1, err))
+			}
 			return err
 		}
 	}
 
-	e.app.UpdateTaskState(taskName, "success", "任务完成")
+	if updater != nil {
+		updater.UpdateTaskState(taskName, "success", "任务完成")
+	}
 	return nil
 }
 
@@ -293,4 +302,9 @@ func RepeatSteps(steps []TaskStep, times int) []TaskStep {
 		result = append(result, steps...)
 	}
 	return result
+}
+
+// GetCoords 获取坐标配置
+func (e *TaskExecutor) GetCoords() *CoordinateConfig {
+	return e.coords
 }
