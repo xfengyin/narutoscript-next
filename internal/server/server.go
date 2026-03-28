@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"embed"
 	"io/fs"
 	"net/http"
@@ -75,7 +76,7 @@ func (s *Server) Start(addr string) error {
 	return s.engine.Run(addr)
 }
 
-func (s *Server) Shutdown(ctx interface{ Done() <-chan struct{} }) error {
+func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
